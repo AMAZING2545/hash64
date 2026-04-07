@@ -65,7 +65,8 @@ public:
   vector<transaction> transactions;
   uint64_t block_reward_receive;
   uint64_t block_reward_address;
-  uint64_t nonce;
+  uint64_t nonce=0;
+  uint64_t nonce_2=0;
   uint64_t hash;
   
   vector<uint64_t> vectorize(){
@@ -87,6 +88,7 @@ public:
     }
     vec.push_back(block_reward_receive);
     vec.push_back(block_reward_address);
+    vec.push_back(nonce_2);
     vec.push_back(nonce);
     
     
@@ -108,11 +110,16 @@ public:
   void mine(uint64_t difficulty){
     vec=vectorize();
     while(tinyhash(vec)>difficulty){
-      vec.back()++;
+      nonce = 0;
+      vec=vectorize();
+      while(vec.back()<0xffffffffffffffffULL){
+        vec.back()++;
+      }
+      nonce_2++;
     }
     hash=calculate_hash();
     nonce=vec.back();
-    cout<<"block mined! hash = "<<hex<<hash<<"\nnonce = "<<vec.back();
+    cout<<"block mined! hash = "<<hex<<hash<<"\nnonce = "<<nonce_2<<nonce;
     print_vectorization(vec);
   }
 };
@@ -300,6 +307,7 @@ public:
             block_json["block_reward_receive"] = b.block_reward_receive;
             block_json["block_reward_address"] = b.block_reward_address;
             block_json["nonce"] = b.nonce;
+            block_json["extended_nonce"] = b.nonce_2;
             block_json["hash"] = b.hash;
             block_json["height"] = b.height;
             json tx_array = json::array();
@@ -378,6 +386,7 @@ public:
           b.hash = block_json["hash"];
           b.height=block_json["height"];
           b.nonce=block_json["nonce"];
+          b.nonce_2=block_json["extended_nonce"];
           if (block_json.contains("transactions")&&block_json["transactions"].is_array()) {
               for (const auto& tx_json : block_json["transactions"]) {
                 transaction trans;
