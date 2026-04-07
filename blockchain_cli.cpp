@@ -17,7 +17,7 @@ struct transaction{
   uint64_t sender;
   uint64_t receiver;
   uint64_t amount;
-  uint64_t hash; //to be replaced with actual encryption
+  uint64_t hash;
 };
 
 uint64_t barrel_leftshift(uint64_t y, uint64_t a) {
@@ -565,6 +565,7 @@ int main() {
           b.hash = block_json["hash"];
           b.height=block_json["height"];
           b.nonce=block_json["nonce"];
+          b.nonce_2=block_json["extended_nonce"];
           if (block_json.contains("transactions")&&block_json["transactions"].is_array()) {
               for (const auto& tx_json : block_json["transactions"]) {
                 transaction trans;
@@ -666,6 +667,7 @@ int main() {
             block_json["block_reward_receive"] = b.block_reward_receive;
             block_json["block_reward_address"] = b.block_reward_address;
             block_json["nonce"] = b.nonce;
+            block_json["extended_nonce"] = b.nonce_2;
             block_json["hash"] = b.hash;
             block_json["height"] = b.height;
             json tx_array = json::array();
