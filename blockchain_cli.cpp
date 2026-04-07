@@ -184,12 +184,13 @@ void from_json(const json& j, block& b) {
 class blockchain{
 
 public:
-  uint64_t height;
+  uint64_t height=0;
   uint64_t trans_number;
   vector<block> chain;
   vector<transaction> pending_transactions;
-  uint64_t difficulty=10000000000;
+  uint64_t difficulty=1000000000;
   uint64_t reward=1000;
+  uint64_t miners=2;
   blockchain(){
     pending_transactions.reserve(100);
     cout<<"created new blockchain!\n";
@@ -320,6 +321,7 @@ public:
         j["difficulty"] = difficulty;
         j["reward"] = reward;
         j["height"]=height;
+        j["miners"]=miners;
         json pending_array = json::array();
         for (const auto& tx : pending_transactions) {
             json tx_json;
@@ -395,6 +397,7 @@ public:
       difficulty = j["difficulty"];
       reward = j["reward"];
       height =j["height"];
+      miners =j["miners"];
       for (const auto& tx_json : j["pending_transactions"]) {
         transaction trans;
         trans.number = tx_json["number"];
@@ -503,6 +506,15 @@ int main() {
           response += std::to_string(get_public(p));
           res.set_content(response, "text/plain");
     });
+    server.Get("/validate_chain", [&bc](const auto &req, auto &res) {
+          res.status = 200;
+          string response;
+          if(bc.is_chain_valid())
+            response="valid";
+          else
+            response="invalid";
+          res.set_content(response, "text/plain");
+    });
     server.Get("/balance", [&bc](const auto &req, auto &res) {
           auto q = req.get_param_value("q");
           uint64_t a = stoi(q);
@@ -580,7 +592,7 @@ int main() {
             b.timestamp=tmp_time;
             b.nonce=tmp_nonce;
             submissions++;
-            if (submissions==4){
+            if (submissions==bc.miners/2){
               int counter=0;
                 //check if hashes match
                 uint64_t n = hash_buffer.size(), maxcount = 0;
