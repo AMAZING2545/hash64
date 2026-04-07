@@ -114,9 +114,11 @@ public:
       vec=vectorize();
       while(vec.back()<0xffffffffffffffffULL){
         vec.back()++;
+        if(tinyhash(vec)<=difficulty) goto exit;
       }
       nonce_2++;
     }
+    exit:
     hash=calculate_hash();
     nonce=vec.back();
     cout<<"block mined! hash = "<<hex<<hash<<"\nnonce = "<<nonce_2<<nonce;
@@ -195,7 +197,7 @@ public:
   uint64_t trans_number;
   vector<block> chain;
   vector<transaction> pending_transactions;
-  uint64_t difficulty=1000000000;
+  uint64_t difficulty=2000000000;
   uint64_t reward=1000;
   uint64_t miners=2;
   blockchain(){
@@ -458,7 +460,7 @@ public:
           }
         }
         if (hash >= difficulty) {
-            cout<< "block "<<i<<" does not meet difficulty requirements! hash: "<< hex<<hash
+            cout<< "block "<<i<<" does not meet difficulty requirements! hash: "<<dec<<hash
             <<"\ndifficulty: "<<difficulty<<endl;
             return 0;
         }
@@ -715,7 +717,7 @@ int main() {
       <<"options:\n"
       <<"1: append transaction (requires private key)\n"
       <<"2: check balance\n"
-      <<"3: create new portfolio\n"
+      <<"3: create new wallet\n"
       <<"4: save chain\n"
       <<"5: mine latest block\n"
       <<"6: make new transaction as JSON\n"
