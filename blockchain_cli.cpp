@@ -7,55 +7,18 @@
 #include "httplib.h"
 #include <fstream>
 #include <sstream>
+
+#include "cryptography.cpp"
+
 using json = nlohmann::json;
 
 using namespace std;
 
 
-struct transaction{
-  uint64_t number;
-  uint64_t sender;
-  uint64_t receiver;
-  uint64_t amount;
-  uint64_t hash;
-};
-
-uint64_t barrel_leftshift(uint64_t y, uint64_t a) {
-    a = a & 63;
-    y = (y << a) | (y >> (sizeof(y)*8 - a));
-    return y;
-}
-
-uint64_t tinyhash(const vector<uint64_t>& v) {
-    uint64_t sum = 0;
-    uint64_t guess = v.at(0);
-    uint64_t secret = 0x9f4289e276d334a0;
-    int size = v.size();
-    
-    for (auto &i : v) 
-        sum = sum + i;
-    
-    for (int i = 0; i < size; ++i) {
-        guess = guess + barrel_leftshift(sum, v.at(i));
-        guess = barrel_leftshift(guess, sum - i);
-        guess = guess xor barrel_leftshift(secret, v.at(i) + guess);
-    }
-    
-    return guess;
-}
-
-uint64_t get_public(uint64_t private_key){
-  uint64_t a=private_key;
-  for(int i = 0; i<6; i++) a*=private_key%17446744073709551611ULL;
-  return a;
-}
-
-
-
 class block{
 private:
   
-  uint16_t size = 6;
+  uint16_t size = 15;
 
 public:
   vector<uint64_t>vec;
@@ -64,34 +27,42 @@ public:
   uint64_t timestamp;
   vector<transaction> transactions;
   uint64_t block_reward_receive;
-  uint64_t block_reward_address;
+  PublicKey block_reward_address;
   uint64_t nonce=0;
   uint64_t nonce_2=0;
   uint64_t hash;
   
   vector<uint64_t> vectorize(){
     transaction tmp;
-    size = 6;
-    size+=transactions.size()*5;
     vec.clear();
     vec.reserve(size);
+    vec.push_back(nonce_2);
+    vec.push_back(nonce);
     vec.push_back(height);
     vec.push_back(previous_hash);
     vec.push_back(timestamp);
+    vector<uint64_t> v;
+    v.reserve(transactions.size()*(1+5+5+8+1));
     for(uint16_t j = 0;j<transactions.size();j++){
       tmp=transactions.at(j);
-      vec.push_back(tmp.number);
-      vec.push_back(tmp.sender);
-      vec.push_back(tmp.receiver);
-      vec.push_back(tmp.amount);
-      vec.push_back(tmp.hash);
+      v.push_back(tmp.number);
+      for(char i = 0;i<5;++i)
+        v.push_back(tmp.sender.parts[i]);
+      for(char i = 0;i<5;++i)
+        v.push_back(tmp.receiver.parts[i]);
+      v.push_back(tmp.amount);
+      for(char i = 0;i<8;++i)
+        v.push_back(tmp.signature[i]);
     }
+    uint64_t a,b,c,d;
+    tinyhash256(v,a,b,c,d);
+    vec.push_back(a);
+    vec.push_back(b);
+    vec.push_back(c);
+    vec.push_back(d);
     vec.push_back(block_reward_receive);
-    vec.push_back(block_reward_address);
-    vec.push_back(nonce_2);
-    vec.push_back(nonce);
-    
-    
+    for(char i = 0;i<5;++i)
+      vec.push_back(block_reward_address.parts[i]);
     return vec;
   }
   void print_vectorization(const vector<uint64_t>& v) {
@@ -101,6 +72,7 @@ public:
       }
   }
   uint64_t calculate_hash(){
+    vec=vectorize();
     return  tinyhash(vec);
   }
   bool isvalid(uint64_t difficulty){
@@ -108,82 +80,26 @@ public:
     return (hash<difficulty)&&(calculate_hash()==hash);
   }
   void mine(uint64_t difficulty){
-    vec=vectorize();
-    while(tinyhash(vec)>difficulty){
+    bool enter=1;
+    while(tinyhash(vec)>difficulty&&enter){
+      enter=0;
       nonce = 0;
       vec=vectorize();
-      while(vec.back()<0xffffffffffffffffULL){
-        vec.back()++;
+      while(vec.at(1)<0xffffffffffffffffULL){
+        vec.at(1)++;
         if(tinyhash(vec)<=difficulty) goto exit;
+        if(vec[1]&32768==0)cout<<vec[1]<<endl;
       }
       nonce_2++;
     }
     exit:
+    nonce=vec.at(1);
     hash=calculate_hash();
-    nonce=vec.back();
+    
     cout<<"block mined! hash = "<<hex<<hash<<"\nnonce = "<<nonce_2<<nonce;
     print_vectorization(vec);
   }
 };
-
-
-
-
-
-
-
-
-
-
-void to_json(json& j, const transaction& t) {
-    j = json{
-        {"number", t.number},
-        {"sender", t.sender},
-        {"receiver", t.receiver},
-        {"amount", t.amount},
-        {"hash", t.hash}
-    };
-}
-
-void from_json(const json& j, transaction& t) {
-    j.at("number").get_to(t.number);
-    j.at("sender").get_to(t.sender);
-    j.at("receiver").get_to(t.receiver);
-    j.at("amount").get_to(t.amount);
-    j.at("hash").get_to(t.hash);
-}
-
-void to_json(json& j, const block& b) {
-    j = json{
-        {"height", b.height},
-        {"previous_hash", b.previous_hash},
-        {"timestamp", b.timestamp},
-        {"transactions", b.transactions},
-        {"block_reward_receive", b.block_reward_receive},
-        {"block_reward_address", b.block_reward_address},
-        {"nonce", b.nonce},
-        {"hash", b.hash}
-    };
-}
-
-void from_json(const json& j, block& b) {
-    j.at("height").get_to(b.height);
-    j.at("previous_hash").get_to(b.previous_hash);
-    j.at("timestamp").get_to(b.timestamp);
-    j.at("transactions").get_to(b.transactions);
-    j.at("block_reward_receive").get_to(b.block_reward_receive);
-    j.at("block_reward_address").get_to(b.block_reward_address);
-    j.at("nonce").get_to(b.nonce);
-    j.at("hash").get_to(b.hash);
-}
-
-
-
-
-
-
-
-
 
 
 
@@ -197,8 +113,8 @@ public:
   uint64_t trans_number;
   vector<block> chain;
   vector<transaction> pending_transactions;
-  uint64_t difficulty=2000000000;
-  uint64_t reward=1000;
+  uint64_t difficulty=1099511627776;
+  uint64_t reward=524288;
   uint64_t miners=2;
   blockchain(){
     pending_transactions.reserve(100);
@@ -210,8 +126,9 @@ public:
     genesis.timestamp=timestamp;
     genesis.previous_hash=0;
     genesis.transactions={};
-    genesis.block_reward_receive=10;
-    genesis.block_reward_address=0;
+    genesis.block_reward_receive=524288;
+    PublicKey key = {17696393948516182787,13902621260475358775,15621036470522131904,9159884703671929289,242};
+    genesis.block_reward_address=key;
     genesis.mine(difficulty);
     chain.push_back(genesis);
   }
@@ -222,7 +139,7 @@ public:
   block get_last_block(){
     return chain.back(); 
   }
-  uint64_t get_balance(uint64_t address, bool &valid){
+  uint64_t get_balance(PublicKey address, bool &valid){
     //this is tricky because it requires unwinding the blockchain
     
     block b;
@@ -232,11 +149,21 @@ public:
     for(i = 0; i<chain.size(); i++){
       b=chain.at(i);
       vector<transaction> t=b.transactions;
-      if(b.block_reward_address==address)
+      if(b.block_reward_address.parts[0]==address.parts[0]&&
+        b.block_reward_address.parts[1]==address.parts[1]&&
+        b.block_reward_address.parts[2]==address.parts[2]&&
+        b.block_reward_address.parts[3]==address.parts[3]&&
+        b.block_reward_address.parts[4]==address.parts[4]
+      )
         balance+=b.block_reward_receive;
       for(int j = 0; j<t.size(); j++){
         tr=t.at(j);
-        if(tr.sender==address){
+        if(tr.sender.parts[0]==address.parts[0]&&
+        tr.sender.parts[1]==address.parts[1]&&
+        tr.sender.parts[2]==address.parts[2]&&
+        tr.sender.parts[3]==address.parts[3]&&
+        tr.sender.parts[4]==address.parts[4]
+          ){
           if(balance < tr.amount){
             cout<<"!negative balance!";
             valid=0;
@@ -244,16 +171,22 @@ public:
           }
           balance-=tr.amount;
         }
-        if(tr.receiver==address) balance+=tr.amount;
+        if(tr.receiver.parts[0]==address.parts[0]&&
+        tr.receiver.parts[1]==address.parts[1]&&
+        tr.receiver.parts[2]==address.parts[2]&&
+        tr.receiver.parts[3]==address.parts[3]&&
+        tr.receiver.parts[4]==address.parts[4]
+          ) balance+=tr.amount;
       }
     }
     valid= 1;
     return balance;
   }
-  void mine_new(uint64_t timestamp, uint64_t address){
+  void mine_new(uint64_t timestamp, PublicKey address){
     block b,l=get_last_block();
     height++;
     b.height=height;
+  
     b.timestamp=timestamp;
     b.previous_hash=l.hash;
     b.transactions=pending_transactions;
@@ -263,6 +196,7 @@ public:
     b.block_reward_address=address;
     b.mine(difficulty);
     chain.push_back(b);
+    if(height%131072==0&&height>0) update_difficulty();
   }
   bool send_block(block b){
     if(b.isvalid(difficulty)){
@@ -271,10 +205,10 @@ public:
     }
     return 1;
   }
-  transaction new_transaction(uint64_t private_key, uint64_t receiver, uint64_t amount, bool ignore){
+  transaction new_transaction(PrivateKey private_key, PublicKey receiver, uint64_t amount, bool ignore){
     transaction trans;
     trans.number=time(nullptr);
-    trans.sender=get_public(private_key);
+    get_public_from_private(private_key, trans.sender);
     trans.receiver=receiver;
     trans.amount=amount;
     bool valid;
@@ -284,18 +218,22 @@ public:
       cout<<"you do not have enough money "<<balance<<endl;
       trans.amount=0;
     }
-    if (receiver == trans.sender){
-      cout<<"no dupe here, you fool\n";
-      trans.amount=0;
-    }
-    vector<uint64_t> v ={trans.number,trans.sender,receiver,amount};
-    trans.hash=tinyhash(v)|(private_key&17769786425166460570ULL);
+    sign(trans, private_key);
     return trans;
   }
   
-  
-  
-  
+  void update_difficulty(){
+    if(height>=131072){ reward=458752; difficulty=68719476736;}
+    if(height>=262144){ reward=393216; difficulty=4294967296;}
+    if(height>=393216){ reward=327680; difficulty=536870912;}
+    if(height>=524288){ reward=262144; difficulty=134217728;}
+    if(height>=655360){ reward=229376; difficulty=33554432;}
+    if(height>=786432){ reward=196608; difficulty=8388608;}
+    if(height>=917504){ reward=163840; difficulty=2097152;}
+    if(height>=1048576){ reward=131072; difficulty=524288;}
+    if(height>=1179648){ reward=114688; difficulty=262144;}
+    if(height>=1310720){ reward=98304; difficulty=131072;}
+  }
 
   
     bool save_to_file(const string& filename) {
@@ -307,7 +245,13 @@ public:
             block_json["previous_hash"] = b.previous_hash;
             block_json["timestamp"] = b.timestamp;
             block_json["block_reward_receive"] = b.block_reward_receive;
-            block_json["block_reward_address"] = b.block_reward_address;
+            
+            block_json["r0"] = b.block_reward_address.parts[0];
+            block_json["r1"] = b.block_reward_address.parts[1];
+            block_json["r2"] = b.block_reward_address.parts[2];
+            block_json["r3"] = b.block_reward_address.parts[3];
+            block_json["r4"] = b.block_reward_address.parts[4];
+                
             block_json["nonce"] = b.nonce;
             block_json["extended_nonce"] = b.nonce_2;
             block_json["hash"] = b.hash;
@@ -316,10 +260,25 @@ public:
             for (const auto& trans : b.transactions) {
                 json tx_json;
                 tx_json["number"] = trans.number;
-                tx_json["sender"] = trans.sender;
-                tx_json["receiver"] = trans.receiver;
+                tx_json["s0"] = trans.sender.parts[0];
+                tx_json["s1"] = trans.sender.parts[1];
+                tx_json["s2"] = trans.sender.parts[2];
+                tx_json["s3"] = trans.sender.parts[3];
+                tx_json["s4"] = trans.sender.parts[4];
+                tx_json["r0"] = trans.receiver.parts[0];
+                tx_json["r1"] = trans.receiver.parts[1];
+                tx_json["r2"] = trans.receiver.parts[2];
+                tx_json["r3"] = trans.receiver.parts[3];
+                tx_json["r4"] = trans.receiver.parts[4];
                 tx_json["amount"] = trans.amount;
-                tx_json["hash"] = trans.hash;
+                tx_json["sig0"] = trans.signature[0];
+                tx_json["sig1"] = trans.signature[1];
+                tx_json["sig2"] = trans.signature[2];
+                tx_json["sig3"] = trans.signature[3];
+                tx_json["sig4"] = trans.signature[4];
+                tx_json["sig5"] = trans.signature[5];
+                tx_json["sig6"] = trans.signature[6];
+                tx_json["sig7"] = trans.signature[7];
                 tx_array.push_back(tx_json);
             }
             block_json["transactions"] = tx_array;
@@ -332,17 +291,32 @@ public:
         j["reward"] = reward;
         j["height"]=height;
         j["miners"]=miners;
-        json pending_array = json::array();
-        for (const auto& tx : pending_transactions) {
-            json tx_json;
-            tx_json["number"] = tx.number;
-            tx_json["sender"] = tx.sender;
-            tx_json["receiver"] = tx.receiver;
-            tx_json["amount"] = tx.amount;
-            tx_json["hash"] = tx.hash;
-            pending_array.push_back(tx_json);
+        json tx_array = json::array();
+        for (const auto& trans : pending_transactions) {
+                json tx_json;
+                tx_json["number"] = trans.number;
+                tx_json["s0"] = trans.sender.parts[0];
+                tx_json["s1"] = trans.sender.parts[1];
+                tx_json["s2"] = trans.sender.parts[2];
+                tx_json["s3"] = trans.sender.parts[3];
+                tx_json["s4"] = trans.sender.parts[4];
+                tx_json["r0"] = trans.receiver.parts[0];
+                tx_json["r1"] = trans.receiver.parts[1];
+                tx_json["r2"] = trans.receiver.parts[2];
+                tx_json["r3"] = trans.receiver.parts[3];
+                tx_json["r4"] = trans.receiver.parts[4];
+                tx_json["amount"] = trans.amount;
+                tx_json["sig0"] = trans.signature[0];
+                tx_json["sig1"] = trans.signature[1];
+                tx_json["sig2"] = trans.signature[2];
+                tx_json["sig3"] = trans.signature[3];
+                tx_json["sig4"] = trans.signature[4];
+                tx_json["sig5"] = trans.signature[5];
+                tx_json["sig6"] = trans.signature[6];
+                tx_json["sig7"] = trans.signature[7];
+                tx_array.push_back(tx_json);
         }
-        j["pending_transactions"] = pending_array;
+        j["pending_transactions"] = tx_array;
         
         // Write to file
         ofstream file(filename);
@@ -384,7 +358,11 @@ public:
           b.previous_hash = block_json["previous_hash"];
           b.timestamp = block_json["timestamp"];
           b.block_reward_receive = block_json["block_reward_receive"];
-          b.block_reward_address = block_json["block_reward_address"];
+          b.block_reward_address.parts[0]=block_json["r0"];
+          b.block_reward_address.parts[1]=block_json["r1"];
+          b.block_reward_address.parts[2]=block_json["r2"];
+          b.block_reward_address.parts[3]=block_json["r3"];
+          b.block_reward_address.parts[4]=block_json["r4"];
           b.hash = block_json["hash"];
           b.height=block_json["height"];
           b.nonce=block_json["nonce"];
@@ -393,10 +371,25 @@ public:
               for (const auto& tx_json : block_json["transactions"]) {
                 transaction trans;
                 trans.number = tx_json["number"];
-                trans.sender = tx_json["sender"];
-                trans.receiver = tx_json["receiver"];
+                trans.sender.parts[0] = tx_json["s0"];
+                trans.sender.parts[1] = tx_json["s0"];
+                trans.sender.parts[2] = tx_json["s0"];
+                trans.sender.parts[3] = tx_json["s0"];
+                trans.sender.parts[4] = tx_json["s0"];
+                trans.receiver.parts[0] = tx_json["r0"];
+                trans.receiver.parts[1] = tx_json["r1"];
+                trans.receiver.parts[2] = tx_json["r2"];
+                trans.receiver.parts[3] = tx_json["r3"];
+                trans.receiver.parts[4] = tx_json["r4"];
                 trans.amount = tx_json["amount"];
-                trans.hash = tx_json["hash"];
+                trans.signature[0] = tx_json["sig0"];
+                trans.signature[1] = tx_json["sig1"];
+                trans.signature[2] = tx_json["sig2"];
+                trans.signature[3] = tx_json["sig3"];
+                trans.signature[4] = tx_json["sig4"];
+                trans.signature[5] = tx_json["sig5"];
+                trans.signature[6] = tx_json["sig6"];
+                trans.signature[7] = tx_json["sig7"];
                 b.transactions.push_back(trans);
               }
           }
@@ -410,12 +403,27 @@ public:
       height =j["height"];
       miners =j["miners"];
       for (const auto& tx_json : j["pending_transactions"]) {
-        transaction trans;
-        trans.number = tx_json["number"];
-        trans.sender = tx_json["sender"];
-        trans.receiver = tx_json["receiver"];
-        trans.amount = tx_json["amount"];
-        trans.hash = tx_json["hash"];
+                transaction trans;
+                trans.number = tx_json["number"];
+                trans.sender.parts[0] = tx_json["s0"];
+                trans.sender.parts[1] = tx_json["s0"];
+                trans.sender.parts[2] = tx_json["s0"];
+                trans.sender.parts[3] = tx_json["s0"];
+                trans.sender.parts[4] = tx_json["s0"];
+                trans.receiver.parts[0] = tx_json["r0"];
+                trans.receiver.parts[1] = tx_json["r1"];
+                trans.receiver.parts[2] = tx_json["r2"];
+                trans.receiver.parts[3] = tx_json["r3"];
+                trans.receiver.parts[4] = tx_json["r4"];
+                trans.amount = tx_json["amount"];
+                trans.signature[0] = tx_json["sig0"];
+                trans.signature[1] = tx_json["sig1"];
+                trans.signature[2] = tx_json["sig2"];
+                trans.signature[3] = tx_json["sig3"];
+                trans.signature[4] = tx_json["sig4"];
+                trans.signature[5] = tx_json["sig5"];
+                trans.signature[6] = tx_json["sig6"];
+                trans.signature[7] = tx_json["sig7"];
         pending_transactions.push_back(trans);
       }
         
@@ -448,11 +456,16 @@ public:
         uint64_t hash = current.hash;
         current.vec=current.vectorize();
         current.print_vectorization(current.vec);
-        if (hash != current.calculate_hash()) {
+        if (hash != tinyhash(current.vec)) {
           cout<<"block " << i << " hash mismatch! Stored: " <<dec<< hash<<" calculated: "<< current.calculate_hash()<< endl;
           return 0;
         }
-        
+        for(auto i : current.transactions){
+          if(!verify(i)){
+            cout<<"A TRANSACTION IS NOT SIGNED!!";
+            return 0;
+          }
+        }
         if (i > 0) {
           if (current.previous_hash != chain.at(i-1).hash) {
             cout<< "block "<<i<<" previous hash mismatch! expected: "<< dec<< chain.at(i-1).hash <<" got: "<<current.previous_hash<< endl;
@@ -471,11 +484,7 @@ public:
     }
 };
 
-uint64_t get_private(){
-  uint64_t t = time(nullptr);
-  vector<uint64_t> p = {t};
-  return tinyhash(p);
-}
+
 
 int main() {
     blockchain bc;
@@ -510,11 +519,22 @@ int main() {
     
     server.Get("/keypair", [](const auto &req, auto &res) {
           res.status = 200;
-          uint64_t p = get_private();
-          std::string response = "private key = ";
-          response += std::to_string(p);
-          response += "\npublic key = ";
-          response += std::to_string(get_public(p));
+          PrivateKey pri;
+          PublicKey pub;
+          generate_keypair(pri, pub);
+          stringstream ss;
+          ss<<"private"<<"key=\n"
+          <<"0:"<<hex<<pri.parts[0]<<endl
+          <<"1:"<<hex<<pri.parts[1]<<endl
+          <<"2:"<<hex<<pri.parts[2]<<endl
+          <<"3:"<<hex<<pri.parts[3]<<endl
+          <<"\npublic"<<"key=\n"
+          <<"0:"<<hex<<pub.parts[0]<<endl
+          <<"1:"<<hex<<pub.parts[1]<<endl
+          <<"2:"<<hex<<pub.parts[2]<<endl
+          <<"3:"<<hex<<pub.parts[3]<<endl
+          <<"4:"<<hex<<pub.parts[4]<<endl;
+          string response=ss.str();
           res.set_content(response, "text/plain");
     });
     server.Get("/validate_chain", [&bc](const auto &req, auto &res) {
@@ -526,25 +546,57 @@ int main() {
             response="invalid";
           res.set_content(response, "text/plain");
     });
-    server.Get("/balance", [&bc](const auto &req, auto &res) {
-          auto q = req.get_param_value("q");
-          uint64_t a = stoi(q);
-          std::string response = "balance = ";
-          bool v;
-          response += std::to_string(bc.get_balance(a, v));
-          res.status = 200;
-          res.set_content(response, "text/plain");
-    });
+server.Get("/balance", [&bc](const auto &req, auto &res) {
+        string q = req.get_param_value("q");
+        if (q.length() < 80) {
+            res.status = 400;
+            res.set_content("Invalid public key length", "text/plain");
+            return;
+        }
+        PublicKey key;
+        memset(key.parts, 0, sizeof(key.parts));
+        for (int i = 0; i < 5; i++) {
+            string chunk = q.substr(i * 16, 16);
+            key.parts[i] = stoull(chunk, nullptr, 16);
+        }
+        bool valid;
+        uint64_t balance = bc.get_balance(key, valid);
+        if (!valid) {
+            res.status = 400;
+            res.set_content("Invalid balance (negative or corrupted chain)", "text/plain");
+            return;
+        }
+        string response = "balance = " + to_string(balance);
+        res.status = 200;
+        res.set_content(response, "text/plain");
+        
+});
     server.Post("/new_transaction", [&bc](const auto &req, auto &res) {
           json tx_json = json::parse(req.body);
-          transaction trans;
-          trans.number = tx_json["number"];
-          trans.sender = tx_json["sender"];
-          trans.receiver = tx_json["receiver"];
-          trans.amount = tx_json["amount"];
-          trans.hash = tx_json["hash"];
+                transaction trans;
+                trans.number = tx_json["number"];
+                trans.sender.parts[0] = tx_json["s0"];
+                trans.sender.parts[1] = tx_json["s1"];
+                trans.sender.parts[2] = tx_json["s2"];
+                trans.sender.parts[3] = tx_json["s3"];
+                trans.sender.parts[4] = tx_json["s4"];
+                trans.receiver.parts[0] = tx_json["r0"];
+                trans.receiver.parts[1] = tx_json["r1"];
+                trans.receiver.parts[2] = tx_json["r2"];
+                trans.receiver.parts[3] = tx_json["r3"];
+                trans.receiver.parts[4] = tx_json["r4"];
+                trans.amount = tx_json["amount"];
+                trans.signature[0] = tx_json["sig0"];
+                trans.signature[1] = tx_json["sig1"];
+                trans.signature[2] = tx_json["sig2"];
+                trans.signature[3] = tx_json["sig3"];
+                trans.signature[4] = tx_json["sig4"];
+                trans.signature[5] = tx_json["sig5"];
+                trans.signature[6] = tx_json["sig6"];
+                trans.signature[7] = tx_json["sig7"];
           bool valid=0;
           string response;
+          verify(trans);
           bc.get_balance(trans.sender, valid);
           if(!valid)
             response="invalid transaction";
@@ -556,12 +608,17 @@ int main() {
           res.set_content(response, "text/plain");
     });
     server.Post("/send_block", [&buffer, &hash_buffer, &bc, &submissions](const auto &req, auto &res) {
-          block b;
           json block_json=json::parse(req.body);
+          block b;
+          cout<<"hello";
           b.previous_hash = block_json["previous_hash"];
           b.timestamp = block_json["timestamp"];
           b.block_reward_receive = block_json["block_reward_receive"];
-          b.block_reward_address = block_json["block_reward_address"];
+          b.block_reward_address.parts[0]=block_json["r0"];
+          b.block_reward_address.parts[1]=block_json["r1"];
+          b.block_reward_address.parts[2]=block_json["r2"];
+          b.block_reward_address.parts[3]=block_json["r3"];
+          b.block_reward_address.parts[4]=block_json["r4"];
           b.hash = block_json["hash"];
           b.height=block_json["height"];
           b.nonce=block_json["nonce"];
@@ -570,10 +627,25 @@ int main() {
               for (const auto& tx_json : block_json["transactions"]) {
                 transaction trans;
                 trans.number = tx_json["number"];
-                trans.sender = tx_json["sender"];
-                trans.receiver = tx_json["receiver"];
+                trans.sender.parts[0] = tx_json["s0"];
+                trans.sender.parts[1] = tx_json["s1"];
+                trans.sender.parts[2] = tx_json["s2"];
+                trans.sender.parts[3] = tx_json["s3"];
+                trans.sender.parts[4] = tx_json["s4"];
+                trans.receiver.parts[0] = tx_json["r0"];
+                trans.receiver.parts[1] = tx_json["r1"];
+                trans.receiver.parts[2] = tx_json["r2"];
+                trans.receiver.parts[3] = tx_json["r3"];
+                trans.receiver.parts[4] = tx_json["r4"];
                 trans.amount = tx_json["amount"];
-                trans.hash = tx_json["hash"];
+                trans.signature[0] = tx_json["sig0"];
+                trans.signature[1] = tx_json["sig1"];
+                trans.signature[2] = tx_json["sig2"];
+                trans.signature[3] = tx_json["sig3"];
+                trans.signature[4] = tx_json["sig4"];
+                trans.signature[5] = tx_json["sig5"];
+                trans.signature[6] = tx_json["sig6"];
+                trans.signature[7] = tx_json["sig7"];
                 b.transactions.push_back(trans);
               }
           }
@@ -582,12 +654,12 @@ int main() {
           cout<<"submissions: "<<submissions<<endl;
           cout<<dec<<tinyhash(b.vectorize())<<flush;
           bool valid=tinyhash(b.vectorize())==b.hash;
-          if(!b.transactions.empty()){
-          for (const auto& tx : b.transactions) {
-            uint64_t balance = bc.get_balance(tx.sender, valid);
-            if (!valid) 
-              break;
-          }
+          for(auto i : b.transactions){
+              if (!verify(i)){
+                valid = 0;
+                cout<<"invalid transaction";
+                break;
+              }
           }
           if(!valid){
              response = "INVALID BLOCK, rejected";
@@ -595,30 +667,31 @@ int main() {
           else{
             response = "VALID, waiting for verification";
             buffer.push_back(b);
-            uint64_t tmp_time = b.timestamp, tmp_nonce=0;
+            uint64_t tmp_time = b.timestamp, tmp_nonce=b.nonce, tmp_exnonce=b.nonce_2;
+            PublicKey tmp_key = b.block_reward_address;
             b.timestamp=0;
             b.nonce=0;
+            b.nonce_2=0;
+            b.block_reward_address={0,0,0,0,0};
             vector<uint64_t> vc;
             vc=b.vectorize();
             hash_buffer.push_back(tinyhash(vc));
             b.timestamp=tmp_time;
             b.nonce=tmp_nonce;
+            b.nonce_2=tmp_exnonce;
+            b.block_reward_address=tmp_key;
             submissions++;
-            if (submissions==bc.miners/2){
+            if (submissions>=bc.miners){
               int counter=0;
                 //check if hashes match
                 uint64_t n = hash_buffer.size(), maxcount = 0;
                 uint64_t res;
-    
                 for (int i = 0; i < n; i++) {
                     uint64_t count = 0;
                     for (int j = 0; j < n; j++) {
                       if (hash_buffer[i] == hash_buffer[j])
                         count++;
                     }
-                              
-                    // If count is greater or if count 
-                    // is same but value is bigger.
                     if (count > maxcount || (count == maxcount && hash_buffer[i] > res)) {
                        maxcount = count;
                        res = hash_buffer[i];
@@ -626,8 +699,9 @@ int main() {
                }
               //res contains the most common
               //linear search
-              uint64_t prev_time=0;
-              uint64_t majority_ix=0;
+              //give the reward to who finished first
+              uint64_t prev_time=0, min_time = 200000000000000;
+              uint64_t majority_ix=0, min_ix=0;
               bool valid=1;
               for(int i = 0; i<n;i++){
                 if(prev_time==buffer.at(i).timestamp){
@@ -637,19 +711,26 @@ int main() {
                 if(hash_buffer.at(i)==res){
                   prev_time=buffer.at(i).timestamp;
                   majority_ix=i;
+                  if(min_time>buffer.at(i).timestamp){
+                    min_time=buffer.at(i).timestamp;
+                    min_ix=i;
+                  }
                 }
               }
               if(!valid){
                 response="VERIFICATION FAILED";
+                submissions--;
               }
               else{
                 response="PASSED, appending to blockchain";
-                bc.chain.push_back(buffer.at(majority_ix));
+                //first valid block
+                bc.chain.push_back(buffer.at(min_ix));
                 bc.save_to_file("chain.json");
               }
               buffer.clear();
               hash_buffer.clear();
               bc.pending_transactions.clear();
+              submissions=0;
           }
         }
           res.status = 200;
@@ -665,7 +746,13 @@ int main() {
             block_json["previous_hash"] = b.previous_hash;
             block_json["timestamp"] = b.timestamp;
             block_json["block_reward_receive"] = b.block_reward_receive;
-            block_json["block_reward_address"] = b.block_reward_address;
+            
+            block_json["r0"] = b.block_reward_address.parts[0];
+            block_json["r1"] = b.block_reward_address.parts[1];
+            block_json["r2"] = b.block_reward_address.parts[2];
+            block_json["r3"] = b.block_reward_address.parts[3];
+            block_json["r4"] = b.block_reward_address.parts[4];
+                
             block_json["nonce"] = b.nonce;
             block_json["extended_nonce"] = b.nonce_2;
             block_json["hash"] = b.hash;
@@ -674,10 +761,25 @@ int main() {
             for (const auto& trans : b.transactions) {
                 json tx_json;
                 tx_json["number"] = trans.number;
-                tx_json["sender"] = trans.sender;
-                tx_json["receiver"] = trans.receiver;
+                tx_json["s0"] = trans.sender.parts[0];
+                tx_json["s1"] = trans.sender.parts[1];
+                tx_json["s2"] = trans.sender.parts[2];
+                tx_json["s3"] = trans.sender.parts[3];
+                tx_json["s4"] = trans.sender.parts[4];
+                tx_json["r0"] = trans.receiver.parts[0];
+                tx_json["r1"] = trans.receiver.parts[1];
+                tx_json["r2"] = trans.receiver.parts[2];
+                tx_json["r3"] = trans.receiver.parts[3];
+                tx_json["r4"] = trans.receiver.parts[4];
                 tx_json["amount"] = trans.amount;
-                tx_json["hash"] = trans.hash;
+                tx_json["sig0"] = trans.signature[0];
+                tx_json["sig1"] = trans.signature[1];
+                tx_json["sig2"] = trans.signature[2];
+                tx_json["sig3"] = trans.signature[3];
+                tx_json["sig4"] = trans.signature[4];
+                tx_json["sig5"] = trans.signature[5];
+                tx_json["sig6"] = trans.signature[6];
+                tx_json["sig7"] = trans.signature[7];
                 tx_array.push_back(tx_json);
             }
             block_json["transactions"] = tx_array;
@@ -696,12 +798,27 @@ int main() {
             for (const auto& trans : bc.pending_transactions) {
                 json tx_json;
                 tx_json["number"] = trans.number;
-                tx_json["sender"] = trans.sender;
-                tx_json["receiver"] = trans.receiver;
+                tx_json["s0"] = trans.sender.parts[0];
+                tx_json["s1"] = trans.sender.parts[1];
+                tx_json["s2"] = trans.sender.parts[2];
+                tx_json["s3"] = trans.sender.parts[3];
+                tx_json["s4"] = trans.sender.parts[4];
+                tx_json["r0"] = trans.receiver.parts[0];
+                tx_json["r1"] = trans.receiver.parts[1];
+                tx_json["r2"] = trans.receiver.parts[2];
+                tx_json["r3"] = trans.receiver.parts[3];
+                tx_json["r4"] = trans.receiver.parts[4];
                 tx_json["amount"] = trans.amount;
-                tx_json["hash"] = trans.hash;
+                tx_json["sig0"] = trans.signature[0];
+                tx_json["sig1"] = trans.signature[1];
+                tx_json["sig2"] = trans.signature[2];
+                tx_json["sig3"] = trans.signature[3];
+                tx_json["sig4"] = trans.signature[4];
+                tx_json["sig5"] = trans.signature[5];
+                tx_json["sig6"] = trans.signature[6];
+                tx_json["sig7"] = trans.signature[7];
                 tx_array.push_back(tx_json);
-            }
+        }
             ss<<tx_array;
             ss>>response;
             cout<<response<<endl;
@@ -710,7 +827,7 @@ int main() {
     });
     
     thread server_thread([&server]() {
-        server.listen("0.0.0.0", 8080);
+        server.listen("0.0.0.0", 8081);
     });
     
     int option=0;
@@ -732,30 +849,48 @@ int main() {
       
       switch(option){
         case 1:{
-          uint64_t private_key, amount, destination;
-          cout<<"enter your private key(it won't be sent to the network) ";
-          cin>>dec>>private_key;
+          uint64_t amount;
+          PrivateKey private_key;
+          PublicKey destination;
+          cout<<"enter your private key(it won't be sent to the network)";
+          for(int i = 0; i<4; i++){
+            cout<<endl<<i<<": ";
+            cin>>hex>>private_key.parts[i];
+          }
           cout<<"enter amount ";
           cin>>dec>>amount;
           cout<<"enter recipient's public key ";
-          cin>>dec>>destination;
+          for(int i = 0; i<5; i++){
+            cout<<endl<<i<<": ";
+            cin>>hex>>destination.parts[i];
+          }
           bc.add_transaction(bc.new_transaction(private_key,destination,amount,0));
           bc.trans_number++;
           break;
         }
         case 2:{
-          uint64_t key;
+          PublicKey key;
           cout<<"enter address ";
-          cin>>dec>>key;
+          for(int i = 0; i<5; i++){
+            cout<<endl<<i<<": ";
+            cin>>hex>>key.parts[i];
+          }
           bool v;
           cout<<dec<<"coins = "<<bc.get_balance(key, v)<<endl;
           break;
         }
         case 3:{
-          uint64_t priv_ =get_private();
-          cout<<"generating private key\n";
-          cout<<"your private key is "<<dec<<priv_<<endl<<"your public key is "<<get_public(priv_)<<endl;
-          cout<<"use your private key to make transactions and your public key to receive transactions\nDO NOT LOSE your PRIVATE key\nLOSING IT MEANS THAT ALL OF YOUR COINS WILL BE LOST";
+          PrivateKey priv_;
+          PublicKey pub;
+          generate_keypair(priv_, pub);
+          cout<<"Private key(write this down on a piece of paper)\n";
+          for(int i = 0; i<4; i++){
+            cout<<i<<"    "<<hex<<priv_.parts[i]<<endl;
+          }
+          cout<<"Public key\n";
+          for(int i = 0; i<5; i++){
+            cout<<i<<"    "<<hex<<pub.parts[i]<<endl;
+          }
           break;
         }
         case 4:{
@@ -766,9 +901,12 @@ int main() {
           break;
         }
         case 5:{
-          uint64_t addr;
+          PublicKey addr;
           cout<<"enter reward address ";
-          cin>>addr;
+          for(int i = 0; i<5; i++){
+            cout<<endl<<i<<": ";
+            cin>>hex>>addr.parts[i];
+          }
           cout<<"mining block "<<dec<<bc.height;
           bc.mine_new(time(nullptr),addr);
           break;
@@ -778,38 +916,84 @@ int main() {
           break;
         }
         case 6:{
-          uint64_t private_key, amount, destination;
-          cout<<"enter your private key(it won't be sent to the network) ";
-          cin>>dec>>private_key;
+          uint64_t amount;
+          PrivateKey private_key;
+          PublicKey destination;
+          cout<<"enter your private key(it won't be sent to the network)";
+          for(int i = 0; i<4; i++){
+            cout<<endl<<i<<": ";
+            cin>>hex>>private_key.parts[i];
+          }
           cout<<"enter amount ";
           cin>>dec>>amount;
           cout<<"enter recipient's public key ";
-          cin>>dec>>destination;
-          transaction trans=bc.new_transaction(private_key,destination,amount,0);
-            json tx_json;
-            tx_json["number"] = trans.number;
-            tx_json["sender"] = trans.sender;
-            tx_json["receiver"] = trans.receiver;
-            tx_json["amount"] = trans.amount;
-            tx_json["hash"] = trans.hash;
+          for(int i = 0; i<5; i++){
+            cout<<endl<<i<<": ";
+            cin>>hex>>destination.parts[i];
+          }
+          transaction trans = bc.new_transaction(private_key,destination,amount,0);
+                json tx_json;
+                tx_json["number"] = trans.number;
+                tx_json["s0"] = trans.sender.parts[0];
+                tx_json["s1"] = trans.sender.parts[1];
+                tx_json["s2"] = trans.sender.parts[2];
+                tx_json["s3"] = trans.sender.parts[3];
+                tx_json["s4"] = trans.sender.parts[4];
+                tx_json["r0"] = trans.receiver.parts[0];
+                tx_json["r1"] = trans.receiver.parts[1];
+                tx_json["r2"] = trans.receiver.parts[2];
+                tx_json["r3"] = trans.receiver.parts[3];
+                tx_json["r4"] = trans.receiver.parts[4];
+                tx_json["amount"] = trans.amount;
+                tx_json["sig0"] = trans.signature[0];
+                tx_json["sig1"] = trans.signature[1];
+                tx_json["sig2"] = trans.signature[2];
+                tx_json["sig3"] = trans.signature[3];
+                tx_json["sig4"] = trans.signature[4];
+                tx_json["sig5"] = trans.signature[5];
+                tx_json["sig6"] = trans.signature[6];
+                tx_json["sig7"] = trans.signature[7];
           cout<<tx_json;
           break;
         }
         case 7:{
-          uint64_t private_key, amount, destination;
-          cout<<"enter your private key(it won't be sent to the network) ";
-          cin>>dec>>private_key;
+          uint64_t amount;
+          PrivateKey private_key;
+          PublicKey destination;
+          cout<<"enter your private key(it won't be sent to the network)";
+          for(int i = 0; i<4; i++){
+            cout<<endl<<i<<": ";
+            cin>>hex>>private_key.parts[i];
+          }
           cout<<"enter amount ";
           cin>>dec>>amount;
           cout<<"enter recipient's public key ";
-          cin>>dec>>destination;
-          transaction trans=bc.new_transaction(private_key,destination,amount,1);
-            json tx_json;
-            tx_json["number"] = trans.number;
-            tx_json["sender"] = trans.sender;
-            tx_json["receiver"] = trans.receiver;
-            tx_json["amount"] = amount;
-            tx_json["hash"] = trans.hash;
+          for(int i = 0; i<5; i++){
+            cout<<endl<<i<<": ";
+            cin>>hex>>destination.parts[i];
+          }
+          transaction trans = bc.new_transaction(private_key,destination,amount,1);
+                json tx_json;
+                tx_json["number"] = trans.number;
+                tx_json["s0"] = trans.sender.parts[0];
+                tx_json["s1"] = trans.sender.parts[1];
+                tx_json["s2"] = trans.sender.parts[2];
+                tx_json["s3"] = trans.sender.parts[3];
+                tx_json["s4"] = trans.sender.parts[4];
+                tx_json["r0"] = trans.receiver.parts[0];
+                tx_json["r1"] = trans.receiver.parts[1];
+                tx_json["r2"] = trans.receiver.parts[2];
+                tx_json["r3"] = trans.receiver.parts[3];
+                tx_json["r4"] = trans.receiver.parts[4];
+                tx_json["amount"] = trans.amount;
+                tx_json["sig0"] = trans.signature[0];
+                tx_json["sig1"] = trans.signature[1];
+                tx_json["sig2"] = trans.signature[2];
+                tx_json["sig3"] = trans.signature[3];
+                tx_json["sig4"] = trans.signature[4];
+                tx_json["sig5"] = trans.signature[5];
+                tx_json["sig6"] = trans.signature[6];
+                tx_json["sig7"] = trans.signature[7];
           cout<<tx_json;
           break;
         }
@@ -819,18 +1003,40 @@ int main() {
             block_json["previous_hash"] = b.previous_hash;
             block_json["timestamp"] = b.timestamp;
             block_json["block_reward_receive"] = b.block_reward_receive;
-            block_json["block_reward_address"] = b.block_reward_address;
+            
+            block_json["r0"] = b.block_reward_address.parts[0];
+            block_json["r1"] = b.block_reward_address.parts[1];
+            block_json["r2"] = b.block_reward_address.parts[2];
+            block_json["r3"] = b.block_reward_address.parts[3];
+            block_json["r4"] = b.block_reward_address.parts[4];
+                
             block_json["nonce"] = b.nonce;
+            block_json["extended_nonce"] = b.nonce_2;
             block_json["hash"] = b.hash;
             block_json["height"] = b.height;
             json tx_array = json::array();
             for (const auto& trans : b.transactions) {
                 json tx_json;
                 tx_json["number"] = trans.number;
-                tx_json["sender"] = trans.sender;
-                tx_json["receiver"] = trans.receiver;
+                tx_json["s0"] = trans.sender.parts[0];
+                tx_json["s1"] = trans.sender.parts[1];
+                tx_json["s2"] = trans.sender.parts[2];
+                tx_json["s3"] = trans.sender.parts[3];
+                tx_json["s4"] = trans.sender.parts[4];
+                tx_json["r0"] = trans.receiver.parts[0];
+                tx_json["r1"] = trans.receiver.parts[1];
+                tx_json["r2"] = trans.receiver.parts[2];
+                tx_json["r3"] = trans.receiver.parts[3];
+                tx_json["r4"] = trans.receiver.parts[4];
                 tx_json["amount"] = trans.amount;
-                tx_json["hash"] = trans.hash;
+                tx_json["sig0"] = trans.signature[0];
+                tx_json["sig1"] = trans.signature[1];
+                tx_json["sig2"] = trans.signature[2];
+                tx_json["sig3"] = trans.signature[3];
+                tx_json["sig4"] = trans.signature[4];
+                tx_json["sig5"] = trans.signature[5];
+                tx_json["sig6"] = trans.signature[6];
+                tx_json["sig7"] = trans.signature[7];
                 tx_array.push_back(tx_json);
             }
             block_json["transactions"] = tx_array;
@@ -844,18 +1050,38 @@ int main() {
           b.previous_hash = block_json["previous_hash"];
           b.timestamp = block_json["timestamp"];
           b.block_reward_receive = block_json["block_reward_receive"];
-          b.block_reward_address = block_json["block_reward_address"];
+          b.block_reward_address.parts[0]=block_json["r0"];
+          b.block_reward_address.parts[1]=block_json["r1"];
+          b.block_reward_address.parts[2]=block_json["r2"];
+          b.block_reward_address.parts[3]=block_json["r3"];
+          b.block_reward_address.parts[4]=block_json["r4"];
           b.hash = block_json["hash"];
           b.height=block_json["height"];
           b.nonce=block_json["nonce"];
+          b.nonce_2=block_json["extended_nonce"];
           if (block_json.contains("transactions")&&block_json["transactions"].is_array()) {
               for (const auto& tx_json : block_json["transactions"]) {
                 transaction trans;
                 trans.number = tx_json["number"];
-                trans.sender = tx_json["sender"];
-                trans.receiver = tx_json["receiver"];
+                trans.sender.parts[0] = tx_json["s0"];
+                trans.sender.parts[1] = tx_json["s0"];
+                trans.sender.parts[2] = tx_json["s0"];
+                trans.sender.parts[3] = tx_json["s0"];
+                trans.sender.parts[4] = tx_json["s0"];
+                trans.receiver.parts[0] = tx_json["r0"];
+                trans.receiver.parts[1] = tx_json["r1"];
+                trans.receiver.parts[2] = tx_json["r2"];
+                trans.receiver.parts[3] = tx_json["r3"];
+                trans.receiver.parts[4] = tx_json["r4"];
                 trans.amount = tx_json["amount"];
-                trans.hash = tx_json["hash"];
+                trans.signature[0] = tx_json["sig0"];
+                trans.signature[1] = tx_json["sig1"];
+                trans.signature[2] = tx_json["sig2"];
+                trans.signature[3] = tx_json["sig3"];
+                trans.signature[4] = tx_json["sig4"];
+                trans.signature[5] = tx_json["sig5"];
+                trans.signature[6] = tx_json["sig6"];
+                trans.signature[7] = tx_json["sig7"];
                 b.transactions.push_back(trans);
               }
           }
@@ -866,15 +1092,30 @@ int main() {
         json j;
         cin>>j;
         vector<transaction> pending;
-        pending.reserve(256);
+        pending.reserve(100);
         for (const auto& tx_json : j) {
-          transaction trans;
-          trans.number = tx_json["number"];
-          trans.sender = tx_json["sender"];
-          trans.receiver = tx_json["receiver"];
-          trans.amount = tx_json["amount"];
-          trans.hash = tx_json["hash"];
-          pending.push_back(trans);
+                transaction trans;
+                trans.number = tx_json["number"];
+                trans.sender.parts[0] = tx_json["s0"];
+                trans.sender.parts[1] = tx_json["s1"];
+                trans.sender.parts[2] = tx_json["s2"];
+                trans.sender.parts[3] = tx_json["s3"];
+                trans.sender.parts[4] = tx_json["s4"];
+                trans.receiver.parts[0] = tx_json["r0"];
+                trans.receiver.parts[1] = tx_json["r1"];
+                trans.receiver.parts[2] = tx_json["r2"];
+                trans.receiver.parts[3] = tx_json["r3"];
+                trans.receiver.parts[4] = tx_json["r4"];
+                trans.amount = tx_json["amount"];
+                trans.signature[0] = tx_json["sig0"];
+                trans.signature[1] = tx_json["sig1"];
+                trans.signature[2] = tx_json["sig2"];
+                trans.signature[3] = tx_json["sig3"];
+                trans.signature[4] = tx_json["sig4"];
+                trans.signature[5] = tx_json["sig5"];
+                trans.signature[6] = tx_json["sig6"];
+                trans.signature[7] = tx_json["sig7"];
+                pending.push_back(trans);
         }
         bc.pending_transactions=pending;
         break;
