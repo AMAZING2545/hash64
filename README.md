@@ -26,25 +26,25 @@ note that openssl is required to be installed on your system
 
 here is the genesis block:\
 
-{
+{\
     "chain": [\
-            {\
+        {\
             "block_reward_receive": 524288,\
             "extended_nonce": 0,\
-            "hash": 431484391793,\
+            "hash": 65115539628,\
             "height": 0,\
-            "nonce": 8563547,\
+            "nonce": 187384981,\
             "previous_hash": 0,\
             "r0": 17696393948516182787,\
             "r1": 13902621260475358775,\
             "r2": 15621036470522131904,\
             "r3": 9159884703671929289,\
             "r4": 242,\
-            "timestamp": 1775987820,\
+            "timestamp": 1775995801,\
             "transactions": []\
         }\
     ],\
-    "difficulty": 1099511627776,
+    "difficulty": 68719476736,
     "height": 0,
     "miners": 2,
     "pending_transactions": [],
