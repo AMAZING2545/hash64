@@ -21,6 +21,9 @@ HTTP endpoints:\
 
 discuss on https://www.reddit.com/r/hash64
 
+compile with this command: g++ -O3 -m64 blockchain_cli.cpp -o blockchain_64 -lcrypto -w\
+note that openssl is required to be installed on your system
+
 here is the genesis block:\
         {\
             "block_reward_receive": 524288,\
