@@ -4,19 +4,19 @@ a PoW blockchain based cryptocurrency written in C++\
 get the latest node binaries in the release tab\
 \
 HTTP endpoints:\
-  GET http://yourip:8080/keypair \
+  GET http://yourip:8081/keypair \
     create a new public/private keypair\
-  GET http://yourip:8080/balance?q=public_key \
+  GET http://yourip:8081/balance?q=public_key \
     get the balance of that wallet address\
-  GET http://yourip:8080/validate_chain \
+  GET http://yourip:8081/validate_chain \
     validate current blockchain status\
-  POST http://yourip:8080/new_transaction \
+  POST http://yourip:8081/new_transaction \
     send a new transaction to the server as JSON\
-  POST http://yourip:8080/send_block \
+  POST http://yourip:8081/send_block \
     send your mined block to the server as JSON\
-  GET http://yourip:8080/last_block \
+  GET http://yourip:8081/last_block \
     get the latest block in the blockchain\
-  GET http://yourip:8080/pending_transactions \
+  GET http://yourip:8081/pending_transactions \
     get the current list of pending transactions\
 
 discuss on https://www.reddit.com/r/hash64
