@@ -10,6 +10,7 @@
 #include "cryptography.cpp"
 #include "blockchain.cpp"
 
+#define CPPHTTPLIB_OPENSSL_SUPPORT
 
 int main() {
     srand(time(nullptr));
